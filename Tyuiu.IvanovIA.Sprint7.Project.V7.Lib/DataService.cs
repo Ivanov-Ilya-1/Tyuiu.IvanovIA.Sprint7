@@ -3,79 +3,337 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 namespace Tyuiu.IvanovIA.Sprint7.Project.V7.Lib
 {
     public class DataService_IvanovIA
     {
-        // Функция 1: Загрузка данных из CSV
+        // Функция 1: Загрузка данных из CSV (с поддержкой разных кодировок)
         public List<ApartmentModel_IvanovIA> LoadFromCSV_IvanovIA(string path)
         {
             List<ApartmentModel_IvanovIA> dataList = new List<ApartmentModel_IvanovIA>();
 
             try
             {
-                string[] allLines = File.ReadAllLines(path);
+                // ПРОБУЕМ РАЗНЫЕ КОДИРОВКИ ДЛЯ ЧТЕНИЯ ФАЙЛА
+                string[] allLines;
 
+                // Сначала пробуем UTF-8 (современная кодировка)
+                try
+                {
+                    allLines = File.ReadAllLines(path, Encoding.UTF8);
+                    Console.WriteLine("Файл прочитан в кодировке UTF-8");
+                }
+                catch
+                {
+                    // Если UTF-8 не работает, пробуем Windows-1251 (русская Windows)
+                    try
+                    {
+                        allLines = File.ReadAllLines(path, Encoding.GetEncoding(1251));
+                        Console.WriteLine("Файл прочитан в кодировке Windows-1251");
+                    }
+                    catch
+                    {
+                        // Если и это не работает, пробуем по умолчанию (системная кодировка)
+                        allLines = File.ReadAllLines(path, Encoding.Default);
+                        Console.WriteLine("Файл прочитан в системной кодировке");
+                    }
+                }
+
+                Console.WriteLine($"Прочитано строк из файла: {allLines.Length}");
+
+                if (allLines.Length == 0)
+                {
+                    Console.WriteLine("Файл пустой!");
+                    return dataList;
+                }
+
+                // Выводим первую строку для отладки
+                Console.WriteLine($"Первая строка файла: {allLines[0]}");
+
+                // Пропускаем заголовок (первую строку)
                 for (int i = 1; i < allLines.Length; i++)
                 {
-                    string line = allLines[i];
+                    string line = allLines[i].Trim();
 
-                    if (string.IsNullOrWhiteSpace(line))
+                    if (string.IsNullOrEmpty(line))
                         continue;
 
-                    string[] parts = line.Split(',');
+                    Console.WriteLine($"Обрабатываем строку {i}: {line}");
 
-                    if (parts.Length >= 11)
+                    // Пробуем разные разделители
+                    string[] parts;
+
+                    if (line.Contains(";") && line.Split(';').Length >= 11)
+                    {
+                        // Разделитель - точка с запятой (русский стандарт)
+                        parts = line.Split(';');
+                        Console.WriteLine($"  Разделитель: точка с запятой, полей: {parts.Length}");
+                    }
+                    else if (line.Contains(",") && line.Split(',').Length >= 11)
+                    {
+                        // Разделитель - запятая (английский стандарт)
+                        parts = line.Split(',');
+                        Console.WriteLine($"  Разделитель: запятая, полей: {parts.Length}");
+                    }
+                    else if (line.Contains("\t"))
+                    {
+                        // Разделитель - табуляция
+                        parts = line.Split('\t');
+                        Console.WriteLine($"  Разделитель: табуляция, полей: {parts.Length}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"  Пропускаем строку {i}: неподдерживаемый формат");
+                        continue;
+                    }
+
+                    if (parts.Length < 11)
+                    {
+                        Console.WriteLine($"  Ошибка: в строке {i} только {parts.Length} полей, нужно 11");
+                        Console.WriteLine($"  Строка: {line}");
+                        continue;
+                    }
+
+                    try
                     {
                         ApartmentModel_IvanovIA item = new ApartmentModel_IvanovIA();
 
-                        item.EntranceNumber = int.Parse(parts[0]);
-                        item.ApartmentNumber = int.Parse(parts[1]);
-                        item.TotalArea = decimal.Parse(parts[2], CultureInfo.InvariantCulture);
-                        item.LivingArea = decimal.Parse(parts[3], CultureInfo.InvariantCulture);
-                        item.RoomsCount = int.Parse(parts[4]);
-                        item.TenantLastName = parts[5];
-                        item.RegistrationDate = DateTime.Parse(parts[6]);
-                        item.FamilyMembers = int.Parse(parts[7]);
-                        item.ChildrenCount = int.Parse(parts[8]);
-                        item.HasDebt = bool.Parse(parts[9]);
-                        item.Notes = parts[10];
+                        // Обрабатываем каждое поле с безопасным парсингом
+                        item.EntranceNumber = ParseIntSafe(parts[0]);
+                        item.ApartmentNumber = ParseIntSafe(parts[1]);
+
+                        // Заменяем точку на запятую для десятичных чисел (для русского формата)
+                        string totalAreaStr = parts[2].Trim().Replace('.', ',');
+                        string livingAreaStr = parts[3].Trim().Replace('.', ',');
+
+                        item.TotalArea = ParseDecimalSafe(totalAreaStr);
+                        item.LivingArea = ParseDecimalSafe(livingAreaStr);
+
+                        item.RoomsCount = ParseIntSafe(parts[4]);
+                        item.TenantLastName = parts[5].Trim();
+
+                        // Разные форматы даты
+                        string dateStr = parts[6].Trim();
+                        item.RegistrationDate = ParseDateSafe(dateStr);
+
+                        item.FamilyMembers = ParseIntSafe(parts[7]);
+                        item.ChildrenCount = ParseIntSafe(parts[8]);
+
+                        // Обработка логического значения (разные варианты)
+                        string debtStr = parts[9].Trim().ToLower();
+                        item.HasDebt = (debtStr == "true" || debtStr == "да" || debtStr == "1" || debtStr == "yes");
+
+                        item.Notes = parts[10].Trim();
 
                         dataList.Add(item);
+
+                        // Вывод в консоль для отладки
+                        Console.WriteLine($"  ✓ Загружена квартира {item.ApartmentNumber}: {item.TenantLastName}, {item.TotalArea} м²");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"  ✗ Ошибка в строке {i}: {ex.Message}");
+                        Console.WriteLine($"    Строка: {line}");
+                        Console.WriteLine($"    Детали: {ex}");
                     }
                 }
+
+                Console.WriteLine($"=== ВСЕГО ЗАГРУЖЕНО ЗАПИСЕЙ: {dataList.Count} ===");
+                return dataList;
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"КРИТИЧЕСКАЯ ОШИБКА ЗАГРУЗКИ ФАЙЛА: {ex.Message}");
+                Console.WriteLine($"Детали: {ex}");
                 throw new Exception($"Ошибка загрузки файла: {ex.Message}");
             }
-
-            return dataList;
         }
 
-        // Функция 2: Сохранение в CSV
+        // Функция 2: Сохранение в CSV (всегда в UTF-8)
         public void SaveToCSV_IvanovIA(List<ApartmentModel_IvanovIA> data, string path)
         {
             try
             {
                 List<string> lines = new List<string>();
 
-                lines.Add("EntranceNumber,ApartmentNumber,TotalArea,LivingArea,RoomsCount,TenantLastName,RegistrationDate,FamilyMembers,ChildrenCount,HasDebt,Notes");
+                // Заголовок всегда на английском (как в модели)
+                lines.Add("EntranceNumber;ApartmentNumber;TotalArea;LivingArea;RoomsCount;TenantLastName;RegistrationDate;FamilyMembers;ChildrenCount;HasDebt;Notes");
 
                 foreach (var item in data)
                 {
-                    string line = $"{item.EntranceNumber},{item.ApartmentNumber},{item.TotalArea.ToString(CultureInfo.InvariantCulture)},{item.LivingArea.ToString(CultureInfo.InvariantCulture)},{item.RoomsCount},{item.TenantLastName},{item.RegistrationDate:yyyy-MM-dd},{item.FamilyMembers},{item.ChildrenCount},{item.HasDebt},{item.Notes}";
+                    // Формируем строку с разделителем ";" (русский стандарт)
+                    string line = $"{item.EntranceNumber};" +
+                                 $"{item.ApartmentNumber};" +
+                                 $"{item.TotalArea.ToString(CultureInfo.InvariantCulture).Replace('.', ',')};" +
+                                 $"{item.LivingArea.ToString(CultureInfo.InvariantCulture).Replace('.', ',')};" +
+                                 $"{item.RoomsCount};" +
+                                 $"{item.TenantLastName};" +
+                                 $"{item.RegistrationDate:dd.MM.yyyy};" +
+                                 $"{item.FamilyMembers};" +
+                                 $"{item.ChildrenCount};" +
+                                 $"{item.HasDebt};" +
+                                 $"{item.Notes}";
+
                     lines.Add(line);
                 }
 
-                File.WriteAllLines(path, lines);
+                // Сохраняем в UTF-8 (без BOM для совместимости)
+                File.WriteAllLines(path, lines, new UTF8Encoding(false));
+
+                Console.WriteLine($"Файл сохранен: {path}");
+                Console.WriteLine($"Кодировка: UTF-8 (без BOM)");
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"ОШИБКА СОХРАНЕНИЯ ФАЙЛА: {ex.Message}");
                 throw new Exception($"Ошибка сохранения: {ex.Message}");
             }
         }
+
+        // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ДЛЯ БЕЗОПАСНОГО ПАРСИНГА
+
+        private int ParseIntSafe(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Console.WriteLine($"  ParseIntSafe: пустое значение, возвращаю 0");
+                return 0;
+            }
+
+            // Удаляем лишние символы
+            value = value.Trim();
+            Console.WriteLine($"  ParseIntSafe: парсим '{value}'");
+
+            // Пробуем стандартный парсинг
+            if (int.TryParse(value, out int result))
+            {
+                Console.WriteLine($"  ParseIntSafe: успешно, результат: {result}");
+                return result;
+            }
+
+            // Если есть дробная часть, берем целую часть
+            if (value.Contains(",") || value.Contains("."))
+            {
+                string[] parts = value.Split(new char[] { ',', '.' });
+                if (parts.Length > 0 && int.TryParse(parts[0], out result))
+                {
+                    Console.WriteLine($"  ParseIntSafe: взята целая часть, результат: {result}");
+                    return result;
+                }
+            }
+
+            // Пробуем удалить нечисловые символы
+            string numbersOnly = new string(value.Where(char.IsDigit).ToArray());
+            if (int.TryParse(numbersOnly, out result) && numbersOnly.Length > 0)
+            {
+                Console.WriteLine($"  ParseIntSafe: удалены нечисловые символы, результат: {result}");
+                return result;
+            }
+
+            Console.WriteLine($"  ParseIntSafe: не удалось распарсить, возвращаю 0");
+            return 0;
+        }
+
+        private decimal ParseDecimalSafe(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Console.WriteLine($"  ParseDecimalSafe: пустое значение, возвращаю 0");
+                return 0;
+            }
+
+            value = value.Trim();
+            Console.WriteLine($"  ParseDecimalSafe: парсим '{value}'");
+
+            // Сохраняем оригинал для сообщений об ошибках
+            string originalValue = value;
+
+            // Пробуем с точкой (международный формат)
+            if (decimal.TryParse(value.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal result))
+            {
+                result = Math.Round(result, 2);
+                Console.WriteLine($"  ParseDecimalSafe: успешно с точкой, результат: {result}");
+                return result;
+            }
+
+            // Пробуем с запятой (русский формат)
+            if (decimal.TryParse(value.Replace('.', ','), NumberStyles.Any, CultureInfo.GetCultureInfo("ru-RU"), out result))
+            {
+                result = Math.Round(result, 2);
+                Console.WriteLine($"  ParseDecimalSafe: успешно с запятой, результат: {result}");
+                return result;
+            }
+
+            // Пробуем удалить все нецифровые символы кроме точек и запятых
+            string cleanValue = new string(value.Where(c => char.IsDigit(c) || c == '.' || c == ',').ToArray());
+            if (!string.IsNullOrEmpty(cleanValue))
+            {
+                if (decimal.TryParse(cleanValue.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out result))
+                {
+                    result = Math.Round(result, 2);
+                    Console.WriteLine($"  ParseDecimalSafe: очищено, результат: {result}");
+                    return result;
+                }
+            }
+
+            Console.WriteLine($"  ParseDecimalSafe: не удалось распарсить '{originalValue}', возвращаю 0");
+            return 0;
+        }
+
+        private DateTime ParseDateSafe(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                Console.WriteLine($"  ParseDateSafe: пустое значение, возвращаю текущую дату");
+                return DateTime.Now;
+            }
+
+            value = value.Trim();
+            Console.WriteLine($"  ParseDateSafe: парсим '{value}'");
+
+            // Пробуем разные форматы дат (самые распространенные)
+            string[] formats = {
+                "yyyy-MM-dd",      // 2023-12-15
+                "dd.MM.yyyy",      // 15.12.2023
+                "dd/MM/yyyy",      // 15/12/2023
+                "yyyy/MM/dd",      // 2023/12/15
+                "MM/dd/yyyy",      // 12/15/2023
+                "dd-MM-yyyy",      // 15-12-2023
+                "yyyy.MM.dd",      // 2023.12.15
+                "d.M.yyyy",        // 15.12.2023 (без ведущих нулей)
+                "d/M/yyyy"         // 15/12/2023 (без ведущих нулей)
+            };
+
+            foreach (string format in formats)
+            {
+                if (DateTime.TryParseExact(value, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime result))
+                {
+                    Console.WriteLine($"  ParseDateSafe: успешно по формату '{format}', результат: {result:dd.MM.yyyy}");
+                    return result;
+                }
+            }
+
+            // Если не удалось распарсить по форматам, пробуем стандартный парсинг
+            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime defaultResult))
+            {
+                Console.WriteLine($"  ParseDateSafe: успешно стандартным парсингом, результат: {defaultResult:dd.MM.yyyy}");
+                return defaultResult;
+            }
+
+            // Пробуем с русской культурой
+            if (DateTime.TryParse(value, CultureInfo.GetCultureInfo("ru-RU"), DateTimeStyles.None, out DateTime ruResult))
+            {
+                Console.WriteLine($"  ParseDateSafe: успешно с русской культурой, результат: {ruResult:dd.MM.yyyy}");
+                return ruResult;
+            }
+
+            Console.WriteLine($"  ParseDateSafe: не удалось распарсить '{value}', возвращаю текущую дату");
+            return DateTime.Now;
+        }
+
+        // ОСТАЛЬНЫЕ ФУНКЦИИ (остаются без изменений)
 
         // Функция 3: Поиск по фамилии
         public List<ApartmentModel_IvanovIA> SearchByLastName_IvanovIA(List<ApartmentModel_IvanovIA> data, string lastName)
